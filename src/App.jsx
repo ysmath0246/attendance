@@ -85,14 +85,7 @@ const pointFields = ["출석", "숙제", "수업태도", "시험", "문제집완
             }
           });
         }
-   // ➕ 초기 가용포인트 설정
-      const initAvail = Object.values(s.points).reduce((a, b) => a + b, 0);
-      batch.set(
-        doc(db, "students", s.id),
-        { availablePoints: initAvail },
-        { merge: true }
-      );
-      s.availablePoints = initAvail;
+ 
 
 
       });
