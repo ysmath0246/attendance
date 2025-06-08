@@ -1,68 +1,85 @@
-:root {
-  font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
-  line-height: 1.5;
-  font-weight: 400;
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
-  color-scheme: light dark;
-  color: rgba(255, 255, 255, 0.87);
-  background-color: #242424;
-
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+/* 애니메이션 */
+@keyframes ping-fast {
+  0% { transform: scale(1); }
+  25% { transform: scale(1.08); }
+  50% { transform: scale(1); }
+}
+.animate-ping-fast {
+  animation: ping-fast 0.6s ease-in-out;
 }
 
-a {
-  font-weight: 500;
-  color: #646cff;
-  text-decoration: inherit;
-}
-a:hover {
-  color: #535bf2;
-}
-
-body {
-  margin: 0;
+/* 카드 스타일 */
+.card {
+  width: 5.5rem;
+  height: 6.5rem;
   display: flex;
-  place-items: center;
-  min-width: 320px;
-  min-height: 100vh;
-}
-
-h1 {
-  font-size: 3.2em;
-  line-height: 1.1;
-}
-
-button {
-  border-radius: 8px;
-  border: 1px solid transparent;
-  padding: 0.6em 1.2em;
-  font-size: 1em;
-  font-weight: 500;
-  font-family: inherit;
-  background-color: #1a1a1a;
+  justify-content: center;
+  align-items: center;
+  flex-direction: column;
+  text-align: center;
+  font-weight: bold;
+  font-size: 0.95rem;
+  border: 2px solid #ccc;
+  border-radius: 0.75rem;
+  background-color: white;
+  transition: all 0.2s ease-in-out;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.04);
   cursor: pointer;
-  transition: border-color 0.25s;
-}
-button:hover {
-  border-color: #646cff;
-}
-button:focus,
-button:focus-visible {
-  outline: 4px auto -webkit-focus-ring-color;
 }
 
-@media (prefers-color-scheme: light) {
-  :root {
-    color: #213547;
-    background-color: #ffffff;
-  }
-  a:hover {
-    color: #747bff;
-  }
-  button {
-    background-color: #f9f9f9;
-  }
+.card:hover {
+  background-color: #f3f4f6;
+}
+/* 출석 시 녹색 배경 (이미 있으시면 수정할 필요 없음) */
+.card.attended {
+  background-color: #16a34a;
+  color: white;
+  border-color: #15803d;
+  transform: scale(1.05);
+}
+
+/* 지각 시 빨간색 배경 */
+.card.tardy {
+  background-color: #ef4444;
+  color: white;
+  border-color: #dc2626;
+  transform: scale(1.05);
+}
+
+.card.animated {
+  animation: pop 0.5s ease-in-out;
+}
+@keyframes pop {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.1); }
+  100% { transform: scale(1); }
+}
+
+/* 텍스트 세부 스타일 */
+.card .name {
+  font-size: 0.9rem;
+  margin-bottom: 0.2rem;
+}
+
+.card .time-text {
+  font-size: 0.8rem;
+  margin-bottom: 0.15rem;
+  text-align: center;
+}
+
+.card .status {
+  font-size: 0.8rem;
+  font-weight: 500;
+  text-align: center;
+}
+
+
+/* 카드 안 텍스트 사이 간격을 절반으로 줄이기 */
+.card p {
+  margin: 2px 0;     /* 위아래 2px */
+  line-height: 1;    /* 줄높이 1 */
 }
