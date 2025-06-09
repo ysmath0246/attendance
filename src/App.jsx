@@ -255,6 +255,7 @@ if (diffMin > 15) {
   }
 
 
+
  // ✅ 1) 출석 기록 저장
     await setDoc(doc(db, "attendance", todayStr), {
       [student.name]: { time: timeStr, status }
@@ -265,9 +266,7 @@ if (diffMin > 15) {
     ...student.points,
     출석: (student.points.출석 || 0) + point
   };
-  const prevAvailable = typeof student.availablePoints === 'number'
-    ? student.availablePoints
-    : Object.values(student.points).reduce((a, b) => a + b, 0);
+const prevAvailable = student.availablePoints ?? 0;
   const updatedAvailable = prevAvailable + point;
 
   // ➕ 3) Firestore 에 총/가용포인트 동시 업데이트
