@@ -8,7 +8,9 @@
     "build": "vite build",
     "preview": "vite preview",
     "lint": "eslint .",
+    "predeploy": "npm run build",
     "deploy": "gh-pages -d docs"
+
   },
   "dependencies": {
     "@radix-ui/react-tabs": "^1.1.12",
@@ -45,5 +47,5 @@
   "bugs": {
     "url": "https://github.com/ysmath0246/attendance/issues"
   },
-  "homepage": "https://github.com/ysmath0246/attendance#readme"
+  "homepage": "https://ysmath0246.github.io/attendance"
 }
