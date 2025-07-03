@@ -213,7 +213,12 @@ useEffect(() => {
 
 
 
-const handleCardClick = async (student, scheduleTime) => {
+ const handleCardClick = async (student, scheduleTime) => {
+  // 이미 오늘자 출석 기록이 있으면 아무 동작도 하지 않음
+  if (attendance[student.name]) {
+    return;
+  }
+
   if (selectedDate !== new Date().toISOString().split("T")[0]) {
   alert("과거나 미래 날짜에는 출석 체크할 수 없습니다!");
   return;
@@ -245,7 +250,6 @@ const diffMin = (now - sched) / 60000;
 let point = 0;
 let status = "onTime";
 let luckyToday = false;
-//const EXCLUDE_NAMES = ["김은우", "조예린"];
 
 if (diffMin > 15) {
   status = "tardy";
@@ -543,8 +547,8 @@ const getTopRankings = (field) => {
                 <div className="grid grid-cols-6 gap-4">
                 {groupedByTime[time].map((student) => {
   const record    = attendance[student.name];
-  const isPresent = record && (record.status === 'onTime' || record.status === 'tardy');  const animate   = animated[student.name];
-
+  // attendance[student.name] 이 있으면 무조건 출석으로 간주
+const isPresent = !!record;
   return (
    <div
       key={student.id}
@@ -554,13 +558,13 @@ const getTopRankings = (field) => {
             ? record.status === "tardy" ? "tardy" : "attended"
             : ""
           }
-          ${animate ? "animated" : ""}
-          ${!isToday
-            ? "cursor-not-allowed pointer-events-none"
-            : isPresent
-              ? "cursor-not-allowed"
-              : "cursor-pointer hover:shadow-lg"
-          }
+          ${animated[student.name] ? "animated" : ""}
+            ${!isToday
+     ? "cursor-not-allowed pointer-events-none"
+     : isPresent
+       ? "cursor-not-allowed pointer-events-none"
+       : "cursor-pointer hover:shadow-lg"
+   }
         `}
       onClick={() => {
         if (!isToday) {
