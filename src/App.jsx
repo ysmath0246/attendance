@@ -32,8 +32,16 @@ const [luckyWinner, setLuckyWinner] = useState(null);
 const [luckyVisible, setLuckyVisible] = useState(false);
 const [highStudents, setHighStudents] = useState([]);
 const [highAttendance, setHighAttendance] = useState({});
+const [dateOffset, setDateOffset] = useState(0);
+const selectedDate = useMemo(() => {
+  const d = new Date();
+  d.setDate(d.getDate() + dateOffset);
+  return d.toISOString().split("T")[0];
+}, [dateOffset]);
 
-
+// ─── 오늘 날짜인지 판단 ───
+  const actualTodayStr = new Date().toISOString().split("T")[0];
+  const isToday = selectedDate === actualTodayStr;
   const totalToday = Object.keys(attendance).length;
   const timeStr = now.toLocaleTimeString([], {
     hour: "2-digit",
@@ -55,9 +63,10 @@ const pointFields = ["출석", "숙제", "수업태도", "시험", "문제집완
 
   const today = new Date();
 // ➕ 로컬 시간(KST) 기준 YYYY-MM-DD
-  const todayStr = new Date().toLocaleDateString("en-CA");  // "2025-05-29" 형태
+const todayStr = selectedDate;
   const weekdays = ["일", "월", "화", "수", "목", "금", "토"];
-  const todayWeekday = weekdays[today.getDay()];
+const todayWeekday = weekdays[new Date(selectedDate).getDay()];
+
 
   useEffect(() => {
     const fetchData = async () => {
@@ -85,7 +94,7 @@ const pointFields = ["출석", "숙제", "수업태도", "시험", "문제집완
             }
           });
         }
- 
+
 
 
       });
@@ -94,14 +103,7 @@ const pointFields = ["출석", "숙제", "수업태도", "시험", "문제집완
     
       // 🚨 오늘 출석 초기화 (이전 테스트 기록 제거)
       // ➕ 오늘 출석 문서를 완전 덮어쓴 뒤, 다시 읽어와서 빈 상태로 초기화
-    const attRef = doc(db, "attendance", todayStr);
-    await setDoc(attRef, {}, { merge: false });
-    const attSnap = await getDoc(attRef);
-    setAttendance(attSnap.exists() ? attSnap.data() : {});
-      const makeupSnap = await getDocs(collection(db, "makeups"));
-      const allMakeups = makeupSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      const todayMakeups = allMakeups.filter(m => m.date === todayStr);
-      setTodayMakeups(todayMakeups);
+   
     };
     
 
@@ -109,6 +111,24 @@ fetchData(); // ✅ 함수 실행
 }, []);
 const [scheduleChanges, setScheduleChanges] = useState([]);
 
+useEffect(() => {
+  const fetchAttendance = async () => {
+    const attRef = doc(db, "attendance", selectedDate);
+    const attSnap = await getDoc(attRef);
+    if (attSnap.exists()) {
+      setAttendance(attSnap.data());
+    } else {
+      setAttendance({});
+    }
+
+    const makeupSnap = await getDocs(collection(db, "makeups"));
+    const allMakeups = makeupSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    const todayMakeups = allMakeups.filter(m => m.date === selectedDate);
+    setTodayMakeups(todayMakeups);
+  };
+
+  fetchAttendance();
+}, [selectedDate]);
 
 
 useEffect(() => {
@@ -129,18 +149,13 @@ useEffect(() => {
   fetchHigh();
 }, []);
 
-
-useEffect(() => {
-  const fetchHighAttendance = async () => {
-    const todayStr = new Date().toISOString().split("T")[0];
-    const snap = await getDoc(doc(db, "high-attendance", todayStr));
-    if (snap.exists()) {
-      setHighAttendance(snap.data());
-    }
-  };
-  fetchHighAttendance();
-}, []);
-
+ useEffect(() => {
+   const fetchHighAttendance = async () => {
+     const snap = await getDoc(doc(db, "high-attendance", selectedDate));
+     setHighAttendance(snap.exists() ? snap.data() : {});
+   };
+   fetchHighAttendance();
+ }, [selectedDate]);
 
 
 const getScheduleForDate = (studentId, dateStr) => {
@@ -156,7 +171,8 @@ const getScheduleForDate = (studentId, dateStr) => {
 
   const getTimeGroups = () => {
   const g = {};
-  const dateStr = today.toISOString().split("T")[0];
+  const dateStr = selectedDate;
+
 
   students.forEach((s) => {
     if (s.active === false || (s.pauseDate && s.pauseDate <= dateStr)) return;
@@ -172,7 +188,11 @@ const getScheduleForDate = (studentId, dateStr) => {
   return g;
 };
 
-const groupedByTime = useMemo(() => getTimeGroups(), [students, scheduleChanges]);
+const groupedByTime = useMemo(
+  () => getTimeGroups(),
+  [students, scheduleChanges, selectedDate]
+);
+
 // 🔁 Lucky 당첨자 Firebase에서 불러오기
 useEffect(() => {
   const loadLuckyWinner = async () => {
@@ -194,6 +214,11 @@ useEffect(() => {
 
 
 const handleCardClick = async (student, scheduleTime) => {
+  if (selectedDate !== new Date().toISOString().split("T")[0]) {
+  alert("과거나 미래 날짜에는 출석 체크할 수 없습니다!");
+  return;
+}
+ 
   const todayStr = new Date().toISOString().split("T")[0]; // ✅ 이 줄이 빠졌음!!
       const record = attendance[student.name];
       // onTime 또는 tardy 상태만 차단하고, '미정'은 허용
@@ -470,13 +495,33 @@ const getTopRankings = (field) => {
                 📌 출석 체크 - {todayWeekday}요일
               </h1>
               <div className="text-gray-600">
-                📅 {todayStr} / ⏰ {timeStr} / ✅ 출석 인원: {totalToday}
+               📅 {selectedDate} / ⏰ {timeStr} / ✅ 출석 인원: {totalToday}
+
               </div>
               <div className="text-center text-lg text-yellow-600 font-bold mb-4">
   🎉 오늘의 Lucky 당첨자: {luckyWinner ? `${luckyWinner}님` : '아직 없음'}
 </div>
 
             </div>
+<div className="flex items-center space-x-2">
+  <button
+    onClick={() => setDateOffset((prev) => prev - 1)}
+    className="bg-gray-300 px-2 py-1 rounded"
+  >
+    ←
+  </button>
+  <div className="text-gray-700 font-semibold">
+    {selectedDate}
+  </div>
+  <button
+    onClick={() => setDateOffset((prev) => prev + 1)}
+    className="bg-gray-300 px-2 py-1 rounded"
+  >
+    →
+  </button>
+</div>
+
+
             <button
               onClick={handleLogout}
               className="bg-red-400 text-white px-4 py-2 rounded"
@@ -501,23 +546,27 @@ const getTopRankings = (field) => {
   const isPresent = record && (record.status === 'onTime' || record.status === 'tardy');  const animate   = animated[student.name];
 
   return (
-    <div
+   <div
       key={student.id}
       className={`
-        card
-        ${isPresent
-          ? record.status === "tardy"
-            ? "tardy"
-            : "attended"
-          : ""
-        }
-        ${animate ? "animated" : ""}
-        ${isPresent
-          ? "cursor-not-allowed opacity-80"
-          : "cursor-pointer hover:shadow-lg"
-        }
-      `}
+          card
+          ${isPresent
+            ? record.status === "tardy" ? "tardy" : "attended"
+            : ""
+          }
+          ${animate ? "animated" : ""}
+          ${!isToday
+            ? "cursor-not-allowed pointer-events-none"
+            : isPresent
+              ? "cursor-not-allowed"
+              : "cursor-pointer hover:shadow-lg"
+          }
+        `}
       onClick={() => {
+        if (!isToday) {
+          alert("과거나 미래 날짜에는 출석 체크할 수 없습니다!");
+          return;
+        }
         if (!isPresent) {
           handleCardClick(student, time);
         } else if (record.status === "tardy") {
@@ -568,12 +617,25 @@ const getTopRankings = (field) => {
     const isPresent = record?.status === "출석";
 
     return (
-      <div
-        key={student.id}
-        className={`card ${isPresent ? "attended" : ""} cursor-pointer hover:shadow-lg`}
-        onClick={() => handleHighCardClick(student)}
-      >
-        <p className="name m-0 leading-none mb-1">{student.name}</p>
+       <div
+      key={student.id}
+     className={`
+          card
+          ${isPresent ? "attended" : ""}
+          ${!isToday
+            ? "cursor-not-allowed pointer-events-none"
+            : "cursor-pointer hover:shadow-lg"
+          }
+        `}
+      onClick={() => {
+        if (!isToday) {
+          alert("과거나 미래 날짜에는 출석 체크할 수 없습니다!");
+          return;
+        }
+        handleHighCardClick(student);
+      }}
+    >
+       <p className="name m-0 leading-none mb-1">{student.name}</p>
         {isPresent && (
           <p className="time-text m-0 leading-none mt-1">
             ✅ 출석<br />{record.time}
