@@ -23,8 +23,13 @@ function AttendanceApp() {
   const [todayMakeups, setTodayMakeups] = useState([]); // 🔥 보강 표시용
   const [selectedTab, setSelectedTab] = useState("attendance");
   const [animated, setAnimated] = useState({});
+  // 비밀번호 입력값
   const [password, setPassword] = useState("");
-  const [authenticated, setAuthenticated] = useState();
+  // 인증 여부: 로컬스토리지에 “authenticated”가 "true" 이면 바로 true, 아니면 false
+   // 로컬스토리지에 저장된 인증 여부를 초기값으로 세팅
+ const [authenticated, setAuthenticated] = useState(() =>
+   localStorage.getItem("authenticated") === "true"
+ );
   const [now, setNow] = useState(new Date());
   const [currentPage, setCurrentPage] = useState(0); // 🔥 추가: 페이지 번호
 // ✅ 1. 상단 useState 추가
@@ -66,6 +71,13 @@ const pointFields = ["출석", "숙제", "수업태도", "시험", "문제집완
 const todayStr = selectedDate;
   const weekdays = ["일", "월", "화", "수", "목", "금", "토"];
 const todayWeekday = weekdays[new Date(selectedDate).getDay()];
+  // ─── 개발용: localhost 에서 띄우면 자동 로그인 ───
+  useEffect(() => {
+    if (window.location.hostname === "localhost") {
+      setAuthenticated(true);
+      localStorage.setItem("authenticated", "true");
+    }
+  }, []);
 
 
   useEffect(() => {
