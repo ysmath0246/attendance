@@ -8,11 +8,17 @@ import {
   setDoc,
   writeBatch,
   updateDoc,
+  onSnapshot, 
  
  
 } from "firebase/firestore";
 import "./index.css";
 
+// ── Bizppurio 호출 모킹 함수 (실제 API 없이 UI/로직만 테스트) ──
+async function sendBizppurioMessage(text) {
+  console.log(`[MOCK] Bizppurio 메시지: ${text}`);
+  // 필요하면 return Promise.resolve();
+}
 
 console.log("🐞 App.jsx v2 로드됨");
 
@@ -124,22 +130,11 @@ fetchData(); // ✅ 함수 실행
 const [scheduleChanges, setScheduleChanges] = useState([]);
 
 useEffect(() => {
-  const fetchAttendance = async () => {
-    const attRef = doc(db, "attendance", selectedDate);
-    const attSnap = await getDoc(attRef);
-    if (attSnap.exists()) {
-      setAttendance(attSnap.data());
-    } else {
-      setAttendance({});
-    }
-
-    const makeupSnap = await getDocs(collection(db, "makeups"));
-    const allMakeups = makeupSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-    const todayMakeups = allMakeups.filter(m => m.date === selectedDate);
-    setTodayMakeups(todayMakeups);
-  };
-
-  fetchAttendance();
+  const attRef = doc(db, "attendance", selectedDate);
+  const unsubscribe = onSnapshot(attRef, snap => {
+    setAttendance(snap.exists() ? snap.data() : {});
+  });
+  return () => unsubscribe();
 }, [selectedDate]);
 
 
@@ -224,124 +219,135 @@ useEffect(() => {
 
 
 
+// App.jsx 상단에 increment 임포트가 되어 있어야 합니다.
+// import { /* … */, updateDoc, setDoc, increment } from "firebase/firestore";
 
- const handleCardClick = async (student, scheduleTime) => {
-  // 이미 오늘자 출석 기록이 있으면 아무 동작도 하지 않음
-  if (attendance[student.name]) {
-    return;
-  }
+const handleCardClick = async (student, scheduleTime) => {
+  const todayStr = new Date().toISOString().split("T")[0];
+  const record   = attendance[student.name];
 
-  if (selectedDate !== new Date().toISOString().split("T")[0]) {
-  alert("과거나 미래 날짜에는 출석 체크할 수 없습니다!");
-  return;
-}
- 
-  const todayStr = new Date().toISOString().split("T")[0]; // ✅ 이 줄이 빠졌음!!
-      const record = attendance[student.name];
-      // onTime 또는 tardy 상태만 차단하고, '미정'은 허용
-     if (record && (record.status === "onTime" || record.status === "tardy")) {
-       alert("이미 출석 처리된 학생입니다.");
-        return;
-      }
+  // ── 1) 처음 클릭 → 출석 처리 ──
+  if (!record) {
+    // 생일 뒷 4자리 인증
     const input = prompt(`${student.name} 생일 뒷 4자리를 입력하세요 (예: 1225)`);
     if (input !== student.birth?.slice(-4)) {
       alert("생일이 일치하지 않습니다.");
       return;
     }
 
-    const timeStr = new Date().toLocaleTimeString([], {
-      hour: "2-digit",
-      minute: "2-digit",
-    });
+    // 시간/스케줄 비교
+    const now     = new Date();
+    const timeStr = now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
     const [hh, mm] = scheduleTime.split(":");
-const sched = new Date();
-sched.setHours(+hh, +mm, 0);
-const now = new Date();
-const diffMin = (now - sched) / 60000;
+    const sched   = new Date(); sched.setHours(+hh, +mm, 0);
+    const diffMin = (now - sched) / 60000;
 
-let point = 0;
-let status = "onTime";
-let luckyToday = false;
-
-if (diffMin > 15) {
-  status = "tardy";
-  point = 0;
- } else if (diffMin >= -10 && diffMin <= 5) {
-   // 기본 출석 포인트 1점
-    point = 1;
-    // 지정된 시간 창(수업시간-10분 ~ +5분) 안에서
-    // 사전 선정된 후보자에게만 Lucky 2pt 부여
-    const nowMs = Date.now();
-    const windowStart = sched.getTime() - 10 * 60000;
-    const windowEnd   = sched.getTime() +  5 * 60000;
-    if (
-      !dailyLucky?.winnerId &&
-      student.id === dailyLucky?.candidateId &&
-      nowMs >= windowStart &&
-      nowMs <= windowEnd
-    ) {
-      // 2pt 부여 및 Winner 업데이트
-      point = 2;
-      luckyToday = true;
-      const luckyRef = doc(db, "dailyLucky", todayStr);
-      await updateDoc(luckyRef, {
-        winnerId: student.id,
-        time: timeStr
-      });
-      setLuckyWinner(student.name);
+    // 상태(status)와 포인트(point) 결정
+    let status = "onTime";
+    let point  = 0;
+    if (diffMin > 15) {
+      status = "tardy";
+      point  = 0;
     }
-  }
- else if (diffMin >= -15 && diffMin < -10) {
-    point = 1;
-  }
+    else if (diffMin >= -10 && diffMin <= 5) {
+      point = 1;
+      // Lucky 2pt 로직
+      const nowMs      = now.getTime();
+      const winStart   = sched.getTime() - 10 * 60000;
+      const winEnd     = sched.getTime() +  5 * 60000;
+      if (!dailyLucky?.winnerId &&
+          student.id === dailyLucky?.candidateId &&
+          nowMs >= winStart &&
+          nowMs <= winEnd
+      ) {
+        point = 2;
+        await updateDoc(doc(db, "dailyLucky", todayStr), {
+          winnerId: student.id,
+          time: timeStr
+        });
+        setLuckyWinner(student.name);
+      }
+    }
+    else if (diffMin >= -15 && diffMin < -10) {
+      point = 1;
+    }
 
-
-
- // ✅ 1) 출석 기록 저장
+    // Firestore에 출석 저장
     await setDoc(doc(db, "attendance", todayStr), {
-      [student.name]: { time: timeStr, status }
+      [student.name]: { arrivalTime: timeStr, status }
     }, { merge: true });
-    setAttendance(prev => ({ ...prev, [student.name]: { time: timeStr, status } }));
- // ➕ 2) 총포인트 + 가용포인트 함께 계산
-  const updated = {
-    ...student.points,
-    출석: (student.points.출석 || 0) + point
-  };
-const prevAvailable = student.availablePoints ?? 0;
-  const updatedAvailable = prevAvailable + point;
+    setAttendance(prev => ({
+      ...prev,
+      [student.name]: { arrivalTime: timeStr, status }
+    }));
 
-  // ➕ 3) Firestore 에 총/가용포인트 동시 업데이트
-  await updateDoc(
-    doc(db, "students", student.id),
-    {
-      points: updated,
-      availablePoints: updatedAvailable
+    // 학생 포인트/가용포인트 업데이트
+    const prevPts   = student.points || {};
+    const newPts    = { ...prevPts, 출석: (prevPts.출석 || 0) + point };
+    const prevAvail = student.availablePoints || 0;
+    const newAvail  = prevAvail + point;
+    await updateDoc(doc(db, "students", student.id), {
+      points: newPts,
+      availablePoints: newAvail
+    });
+    setStudents(prev =>
+      prev.map(s =>
+        s.id === student.id
+          ? { ...s, points: newPts, availablePoints: newAvail }
+          : s
+      )
+    );
+
+    // 알림 및 UI
+    sendBizppurioMessage(`${student.name}님 출석하였습니다`);
+    alert(`✅ ${student.name}님 출석 완료! (+${point}pt)`);
+    return;
+  }
+
+  // ── 2) 두 번째 클릭 → 하원 처리 ──
+  if (record.arrivalTime && !record.departureTime) {
+    const pw = prompt(`${student.name} 생일 뒷 4자리를 입력하세요 (예: 1225)`);
+    if (pw !== student.birth?.slice(-4)) {
+      alert("비밀번호가 틀렸습니다.");
+      return;
     }
-  );
+    const depTime = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
 
-  // ➕ 4) 로컬 상태에도 즉시 반영
-  setStudents(prev =>
-    prev.map(s =>
-      s.id === student.id
-        ? { ...s, points: updated, availablePoints: updatedAvailable }
-        : s
-    )
-  );
-// ✅ 애니메이션 설정
-setAnimated(prev => ({ ...prev, [student.name]: true }));
-setTimeout(() => setAnimated(prev => ({ ...prev, [student.name]: false })), 1500);
+    // Firestore에 하원시간 추가
+    await updateDoc(doc(db, "attendance", todayStr), {
+      [`${student.name}.departureTime`]: depTime
+    });
 
-// ✅ Lucky 표시
-if (luckyToday) {
-  setLuckyWinner(student.name);
-  setLuckyVisible(true);
-  setTimeout(() => setLuckyVisible(false), 2500);
-  alert(`🎉 Lucky!!! ${student.name}님 2pt 당첨!`);
-} else {
-  alert(`✅ ${student.name}님 출석 완료! (+${point}pt)`);
-}
+    // 하원 시 출석 포인트 1pt 추가
+    await updateDoc(doc(db, "students", student.id), {
+      "points.출석": increment(1),
+      availablePoints: increment(1)
+    });
+    setStudents(prev =>
+      prev.map(s =>
+        s.id === student.id
+          ? {
+              ...s,
+              points: { ...s.points, 출석: (s.points.출석||0) + 1 },
+              availablePoints: (s.availablePoints||0) + 1
+            }
+          : s
+      )
+    );
 
+    // 로컬 출석 상태 업데이트
+    setAttendance(prev => ({
+      ...prev,
+      [student.name]: { ...prev[student.name], departureTime: depTime }
+    }));
 
+    // 알림 및 UI
+    sendBizppurioMessage(`${student.name}님 하원하였습니다`);
+    alert(`✅ ${student.name}님 하원 완료! (+1pt)`);
+    return;
+  }
+
+  // ── 3) 이미 출석·하원 모두 처리된 경우엔 아무 동작 안 함 ──
 };
 
 //setStudents((prev) =>
@@ -558,38 +564,37 @@ const getTopRankings = (field) => {
                 </h2>
                 <div className="grid grid-cols-6 gap-4">
                 {groupedByTime[time].map((student) => {
-  const record    = attendance[student.name];
-  // attendance[student.name] 이 있으면 무조건 출석으로 간주
-const isPresent = !!record;
-  return (
-   <div
+  const record      = attendance[student.name];
+  const isPresent   = !!record;
+  const hasDeparted = !!record?.departureTime;  // ✨ 하원 여부
+ return (
+    <div
       key={student.id}
       className={`
-          card
-          ${isPresent
-            ? record.status === "tardy" ? "tardy" : "attended"
-            : ""
-          }
-          ${animated[student.name] ? "animated" : ""}
-            ${!isToday
-     ? "cursor-not-allowed pointer-events-none"
-     : isPresent
-       ? "cursor-not-allowed pointer-events-none"
-       : "cursor-pointer hover:shadow-lg"
-   }
-        `}
-      onClick={() => {
-        if (!isToday) {
-          alert("과거나 미래 날짜에는 출석 체크할 수 없습니다!");
-          return;
+        relative            /* 스탬프 위치를 위해 */
+        card
+        ${isPresent
+          ? record.status === "tardy" ? "tardy" : "attended"
+         : ""
         }
-        if (!isPresent) {
-          handleCardClick(student, time);
-        } else if (record.status === "tardy") {
-          handleOverrideTardy(student.name);
+{hasDeparted
+  ? "border-4 border-blue-700 ring-4 ring-blue-300 ring-offset-2 ring-offset-white"
+  : ""}        ${animated[student.name] ? "animated" : ""}
+        ${!isToday
+          ? "cursor-not-allowed pointer-events-none"
+          : hasDeparted      /* 하원 완료된 경우에만 비활성화 */
+            ? "cursor-not-allowed pointer-events-none"
+            : "cursor-pointer hover:shadow-lg"
         }
-      }}
+      `}
+     onClick={() => handleCardClick(student, time)}
     >
+      {/* ── 하원 완료 스탬프 ── */}
+      {hasDeparted && (
+        <div className="absolute top-2 right-2 bg-blue-500 text-white text-xs font-bold px-1 py-0.5 rounded">
+          
+        </div>
+      )}
       {/* ─── 카드 내부 콘텐츠 ─── */}
       {/* 👑 Lucky 당첨자 왕관 */}
 {student.name === luckyWinner && (
@@ -609,11 +614,18 @@ const isPresent = !!record;
 
       {/* 3) 이미 출석했으면 상태·시간 표시 */}
       {isPresent && (
-        <p className="time-text m-0 leading-none mt-1">
-          {record.status === "tardy" ? "⚠️ 지각" : "✅ 출석"}<br />
-          {record.time}
-        </p>
-      )}
+  <div className="time-text m-0 leading-none mt-1 text-sm">
+    <div>
+      {record.status === "tardy" ? "⚠️ 지각" : "✅ 출석"}
+    </div>
+    {/* 출석시간 */}
+    <div>출석: {record.arrivalTime}</div>
+    {/* 하원시간이 있을 때만 */}
+    {record.departureTime && (
+      <div>하원: {record.departureTime}</div>
+    )}
+  </div>
+)}
       {/* ─── 카드 내부 콘텐츠 끝 ─── */}
     </div>
   );
