@@ -29,7 +29,19 @@
   transition: all 0.2s ease-in-out;
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.04);
   cursor: pointer;
+
+  /* 추가: 텍스트 선택 방지 */
+  -webkit-user-select: none;    /* iOS Safari */
+  -ms-user-select: none;        /* IE10+ */
+  user-select: none;            /* 표준 */
+
+  /* 추가: 길게 누를 때 나오는 callout(검색/번역) 방지 */
+  -webkit-touch-callout: none;  /* iOS Safari */
+
+  /* 추가: 터치 하이라이트 제거 */
+  -webkit-tap-highlight-color: transparent;
 }
+
 
 .card:hover {
   background-color: #f3f4f6;

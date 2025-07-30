@@ -9,7 +9,7 @@ import {
   writeBatch,
   updateDoc,
   onSnapshot, 
- 
+ increment   
  
 } from "firebase/firestore";
 import "./index.css";
@@ -306,6 +306,16 @@ const handleCardClick = async (student, scheduleTime) => {
 
   // ── 2) 두 번째 클릭 → 하원 처리 ──
   if (record.arrivalTime && !record.departureTime) {
+// ▶ 수업 시작시간(scheduleTime)으로부터 100분 이후에만 하원 가능
+    const now = new Date();
+    const [hhStart, mmStart] = scheduleTime.split(":");
+    const start = new Date();
+    start.setHours(+hhStart, +mmStart, 0);
+    if (now - start < 100 * 60 * 1000) {
+      alert("하원은 수업 시작 후 100분 이후에만 가능합니다!");
+      return;
+    }
+
     const pw = prompt(`${student.name} 생일 뒷 4자리를 입력하세요 (예: 1225)`);
     if (pw !== student.birth?.slice(-4)) {
       alert("비밀번호가 틀렸습니다.");
@@ -587,6 +597,8 @@ const getTopRankings = (field) => {
             : "cursor-pointer hover:shadow-lg"
         }
       `}
+
+      onContextMenu={(e) => e.preventDefault()}
      onClick={() => handleCardClick(student, time)}
     >
       {/* ── 하원 완료 스탬프 ── */}
