@@ -273,12 +273,13 @@ const handleCardClick = async (student, scheduleTime) => {
     }
 
     // Firestore에 출석 저장
-    await setDoc(doc(db, "attendance", todayStr), {
-      [student.name]: { arrivalTime: timeStr, status }
-    }, { merge: true });
+   await setDoc(doc(db, "attendance", todayStr), {
+   [student.name]: { time: timeStr, status }
+ }, { merge: true });
+
     setAttendance(prev => ({
       ...prev,
-      [student.name]: { arrivalTime: timeStr, status }
+      [student.name]: { time: timeStr, status }
     }));
 
     // 학생 포인트/가용포인트 업데이트
@@ -305,7 +306,7 @@ const handleCardClick = async (student, scheduleTime) => {
   }
 
   // ── 2) 두 번째 클릭 → 하원 처리 ──
-  if (record.arrivalTime && !record.departureTime) {
+  if (record.time && !record.departureTime) {
 // ▶ 수업 시작시간(scheduleTime)으로부터 100분 이후에만 하원 가능
     const now = new Date();
     const [hhStart, mmStart] = scheduleTime.split(":");
@@ -631,7 +632,7 @@ const getTopRankings = (field) => {
       {record.status === "tardy" ? "⚠️ 지각" : "✅ 출석"}
     </div>
     {/* 출석시간 */}
-    <div>출석: {record.arrivalTime}</div>
+    <div>출석: {record.time}</div>
     {/* 하원시간이 있을 때만 */}
     {record.departureTime && (
       <div>하원: {record.departureTime}</div>
