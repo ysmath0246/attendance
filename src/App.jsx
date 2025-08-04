@@ -92,7 +92,7 @@ const todayWeekday = weekdays[new Date(selectedDate).getDay()];
       const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
     
       // ✅ 기존 points: 숫자 → 항목별 객체로 마이그레이션
-      const batch = writeBatch(db);
+     const batch = writeBatch(db);
       list.forEach((s) => {
         if (typeof s.points === "number") {
           const converted = {
@@ -113,7 +113,11 @@ const todayWeekday = weekdays[new Date(selectedDate).getDay()];
           });
         }
 
-
+  // 🔥 가용포인트 초기화: availablePoints 필드가 없으면 0으로 설정
+      if (s.availablePoints === undefined) {
+        s.availablePoints = 0;
+        batch.update(doc(db, "students", s.id), { availablePoints: 0 });
+      }
 
       });
       await batch.commit();
