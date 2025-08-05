@@ -24,6 +24,7 @@ console.log("🐞 App.jsx v2 로드됨");
 
 
 function AttendanceApp() {
+
   const [students, setStudents] = useState([]);
   const [attendance, setAttendance] = useState({});
   const [todayMakeups, setTodayMakeups] = useState([]); // 🔥 보강 표시용
@@ -84,7 +85,16 @@ const todayWeekday = weekdays[new Date(selectedDate).getDay()];
       localStorage.setItem("authenticated", "true");
     }
   }, []);
-
+  // 📌 브라우저 “/” 키로 열리는 페이지 찾기 막기
+  useEffect(() => {
+    const blockSlash = (e) => {
+      if (e.key === "/") {
+        e.preventDefault();
+      }
+    };
+    window.addEventListener("keydown", blockSlash);
+    return () => window.removeEventListener("keydown", blockSlash);
+  }, []);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -604,7 +614,10 @@ const getTopRankings = (field) => {
       `}
 
       onContextMenu={(e) => e.preventDefault()}
-     onClick={() => handleCardClick(student, time)}
+     onClick={(e) => {
+      e.preventDefault();           // 클릭 기본 동작 차단
+      handleCardClick(student, time);
+    }}
     >
       {/* ── 하원 완료 스탬프 ── */}
       {hasDeparted && (
