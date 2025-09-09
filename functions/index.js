@@ -1,60 +1,87 @@
-const functions = require('firebase-functions');
-const admin     = require('firebase-admin');
-const axios     = require('axios');
+// V2 API 버전 (config 방식)
+// ─────────────────────────────────────────────────────────
+const { onCall, HttpsError } = require("firebase-functions/v2/https");
+const { logger } = require("firebase-functions/logger");
+const { initializeApp } = require("firebase-admin/app");
+const axios = require("axios");
 
-admin.initializeApp();
+initializeApp();
 
-// 환경 변수로부터 읽어오기
-const KAKAO_API_KEY = functions.config().kakao.rest_api_key;
-const TEMPLATE_CODE = functions.config().kakao.template_code;
+function getCfg() {
+  // config는 루트에서 가져옵니다 (region과 무관)
+  const cfg = require("firebase-functions").config();
+  return {
+    account:   cfg.biz?.account,
+    password:  cfg.biz?.password,
+    from:      cfg.biz?.from,
+    senderkey: cfg.kakao?.senderkey,  // 없으면 알림톡 생략
+    tplIn:     cfg.tpl?.checkin,      // 없으면 알림톡 생략
+    tplOut:    cfg.tpl?.checkout      // 없으면 알림톡 생략
+  };
+}
 
-// attendance/{date} 문서가 생성될 때마다 실행
-exports.sendAttendanceAlerts = functions.firestore
-  .document('attendance/{date}')
-  .onCreate(async (snap, context) => {
-    const attendanceData = snap.data();  
-    const dateLabel = context.params.date; // ex. "2025-06-18"
-
-    // attendanceData 구조 예시:
-    // {
-    //   "김가린": { status: "onTime", time: "오후 02:21", parentPhone: "01012345678" },
-    //   "김보민": { status: "late",   time: "오후 02:51", parentPhone: "01098765432" },
-    //    …
-    // }
-
-    // 학생별로 카카오 알림톡 전송
-    const promises = Object.entries(attendanceData).map(async ([studentName, info]) => {
-      // info.status, info.time 외에 parentPhone 필드를 미리 컬렉션에 저장했다면 사용
-      const parentPhone = info.parentPhone;  
-      if (!parentPhone) return;
-
-      // 보낼 메시지 변수 매핑
-      const variables = {
-        학생명: studentName,
-        날짜: dateLabel,
-        상태: info.status === 'onTime' ? '출석' : info.status === 'late' ? '지각' : info.status,
-        출석시간: info.time
-      };
-
-      try {
-        await axios.post('https://api.bizmessage.kakao.com/v1/message/send', {
-          template_code: TEMPLATE_CODE,
-          message: {
-            to: parentPhone,
-            variables
-          }
-        }, {
-          headers: {
-            'Authorization': `KakaoAK ${KAKAO_API_KEY}`,
-            'Content-Type': 'application/json'
-          }
-        });
-        console.log(`✅ ${studentName} 알림톡 전송 성공`);
-      } catch (err) {
-        console.error(`❌ ${studentName} 전송 실패`, err.response?.data || err.message);
-      }
-    });
-
-    // 모든 전송이 끝날 때까지 대기
-    await Promise.all(promises);
+async function getAccessToken() {
+  const { account, password } = getCfg();
+  const basic = Buffer.from(`${account}:${password}`).toString("base64");
+  const r = await axios.post("https://api.bizppurio.com/v1/token", null, {
+    headers: { Authorization: `Basic ${basic}`, "Content-Type": "application/json; charset=utf-8" }
   });
+  return `${r.data.type} ${r.data.accesstoken}`;
+}
+
+exports.sendAttendanceNotifications = onCall(
+  { region: "asia-northeast3", timeoutSeconds: 30 },
+  async (req) => {
+    try {
+      const data = req.data || {};
+      if (!["checkin","checkout"].includes(data.kind) ||
+          !data.studentName || !data.parentPhone || !data.timeText) {
+        throw new HttpsError("invalid-argument", "필수값 누락");
+      }
+
+      const { account, from, senderkey, tplIn, tplOut } = getCfg();
+      const isIn = data.kind === "checkin";
+      const templatecode = isIn ? tplIn : tplOut;
+      const hasKakao = !!(senderkey && templatecode);
+
+      const atMessage  = isIn
+        ? `${data.studentName}님 ${data.timeText} 등원했습니다.`
+        : `${data.studentName}님 ${data.timeText} 하원했습니다.`;
+      const smsMessage = `[${isIn ? "등원" : "하원"}] ${data.studentName} ${data.timeText}`;
+      const ref = `${Date.now()}_${data.parentPhone}_${data.kind}`;
+
+      const token = await getAccessToken();
+      const headers = { Authorization: token, "Content-Type": "application/json; charset=utf-8" };
+
+      if (hasKakao && data.sendBoth) {
+        // 알림톡 + 문자 동시
+        await axios.post("https://api.bizppurio.com/v3/message", {
+          account, refkey: `${ref}_AT`, type: "at", from, to: data.parentPhone,
+          content: { at: { senderkey, templatecode, message: atMessage } }
+        }, { headers });
+        await axios.post("https://api.bizppurio.com/v3/message", {
+          account, refkey: `${ref}_SMS`, type: "sms", from, to: data.parentPhone,
+          content: { sms: { message: smsMessage } }
+        }, { headers });
+      } else if (hasKakao) {
+        // 알림톡 우선 + 실패시 문자 대체
+        await axios.post("https://api.bizppurio.com/v3/message", {
+          account, refkey: `${ref}_AT`, type: "at", from, to: data.parentPhone,
+          content: { at: { senderkey, templatecode, message: atMessage } },
+          resend: "sms", recontent: { sms: { message: smsMessage } }
+        }, { headers });
+      } else {
+        // ✅ 카카오 값이 없으면 SMS만
+        await axios.post("https://api.bizppurio.com/v3/message", {
+          account, refkey: `${ref}_SMS`, type: "sms", from, to: data.parentPhone,
+          content: { sms: { message: smsMessage } }
+        }, { headers });
+      }
+
+      return { ok: true };
+    } catch (e) {
+      logger.error("sendAttendanceNotifications failed", e?.response?.data || e);
+      throw new HttpsError("internal", "bizppurio send failed");
+    }
+  }
+);

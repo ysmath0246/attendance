@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useMemo } from "react";
-import { db } from "./firebase";
+import { getFunctions, httpsCallable } from "firebase/functions";import { db } from "./firebase";
+
 import {
   collection,
   doc,
@@ -14,14 +15,51 @@ import {
 } from "firebase/firestore";
 import "./index.css";
 
-// ── Bizppurio 호출 모킹 함수 (실제 API 없이 UI/로직만 테스트) ──
-async function sendBizppurioMessage(text) {
-  console.log(`[MOCK] Bizppurio 메시지: ${text}`);
-  // 필요하면 return Promise.resolve();
+// ── Bizppurio 실제 호출 (Cloud Functions httpsCallable) ──
+const functions = getFunctions(undefined, "asia-northeast3");
+const sendNoti = httpsCallable(functions, "sendAttendanceNotifications");
+
+/**
+ * kind: "checkin" | "checkout"
+ * student: 학생 객체(부모 연락처 필드가 있으면 자동 인식)
+ * opts: { scheduleTime?: "HH:MM", timeText: "HH:MM" }
+ */
+async function sendBizppurioMessage(kind, student, opts = {}) {
+ const rawPhone = student.parentPhone ?? "";
+  const to = String(rawPhone).replace(/\D/g, ""); // 하이픈/공백 제거
+  if (!/^0\d{9,10}$/.test(to)) {
+    console.warn("전화번호 형식이 올바르지 않습니다:", student.name, rawPhone);
+    return; // 잘못된 번호면 전송 스킵(로그만 남김)
+  }
+  if (!to) {
+    console.warn("학부모 연락처가 없어 알림 전송을 스킵합니다:", student.name);
+    return;
+  }
+  const payload = {
+    kind,                                 // "checkin" | "checkout"
+    studentName: student.name,            // 학생명
+    parentPhone: to,                      // 받는번호(숫자만)
+    classTitle: student.classTitle ?? "", // 선택: 반 이름/요일 등
+    classTime: opts.scheduleTime,         // 선택: 수업 시작 "HH:MM"
+    timeText: opts.timeText,              // 실제 등/하원 시각 "HH:MM"
+    sendBoth: true                        // 알림톡+문자 동시 발송 (원하면 false로 전환)
+  };
+  try {
+    await sendNoti(payload);
+  } catch (e) {
+    console.error("Bizppurio 전송 실패:", e);
+  }
 }
 
 console.log("🐞 App.jsx v2 로드됨");
 
+// KST(로컬) 기준 YYYY-MM-DD (함수 선언은 호이스팅되므로 안전)
+function ymdLocal(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${dd}`;
+}
 
 function AttendanceApp() {
 
@@ -45,14 +83,14 @@ const [luckyVisible, setLuckyVisible] = useState(false);
 const [highStudents, setHighStudents] = useState([]);
 const [highAttendance, setHighAttendance] = useState({});
 const [dateOffset, setDateOffset] = useState(0);
-const selectedDate = useMemo(() => {
-  const d = new Date();
-  d.setDate(d.getDate() + dateOffset);
-  return d.toISOString().split("T")[0];
-}, [dateOffset]);
+ const selectedDate = useMemo(() => {
+   const d = new Date();
+   d.setDate(d.getDate() + dateOffset);
+   return ymdLocal(d);
+ }, [dateOffset]);
 
 // ─── 오늘 날짜인지 판단 ───
-  const actualTodayStr = new Date().toISOString().split("T")[0];
+  const actualTodayStr = ymdLocal(new Date());
   const isToday = selectedDate === actualTodayStr;
   const totalToday = Object.keys(attendance).length;
   const timeStr = now.toLocaleTimeString([], {
@@ -72,6 +110,7 @@ const selectedDate = useMemo(() => {
 // ✅ 포인트 항목 리스트 선언
 const pointFields = ["출석", "숙제", "수업태도", "시험", "문제집완료"];
 
+const [dailyLucky, setDailyLucky] = useState({ winnerId: null, candidateId: null });
 
   const today = new Date();
 // ➕ 로컬 시간(KST) 기준 YYYY-MM-DD
@@ -217,12 +256,13 @@ const groupedByTime = useMemo(
 // 🔁 Lucky 당첨자 Firebase에서 불러오기
 useEffect(() => {
   const loadLuckyWinner = async () => {
-    const todayStr = new Date().toISOString().split("T")[0];
+    const todayStr = ymdLocal(new Date());
     const luckyRef = doc(db, "dailyLucky", todayStr);
     const luckySnap = await getDoc(luckyRef);
     if (luckySnap.exists()) {
       const data = luckySnap.data();
       setLuckyWinner(data.name);
+      setDailyLucky(data); 
     }
   };
   loadLuckyWinner();
@@ -237,7 +277,7 @@ useEffect(() => {
 // import { /* … */, updateDoc, setDoc, increment } from "firebase/firestore";
 
 const handleCardClick = async (student, scheduleTime) => {
-  const todayStr = new Date().toISOString().split("T")[0];
+  const todayStr = ymdLocal(new Date());
   const record   = attendance[student.name];
 
   // ── 1) 처음 클릭 → 출석 처리 ──
@@ -265,22 +305,7 @@ const handleCardClick = async (student, scheduleTime) => {
     }
     else if (diffMin >= -10 && diffMin <= 5) {
       point = 1;
-      // Lucky 2pt 로직
-      const nowMs      = now.getTime();
-      const winStart   = sched.getTime() - 10 * 60000;
-      const winEnd     = sched.getTime() +  5 * 60000;
-      if (!dailyLucky?.winnerId &&
-          student.id === dailyLucky?.candidateId &&
-          nowMs >= winStart &&
-          nowMs <= winEnd
-      ) {
-        point = 2;
-        await updateDoc(doc(db, "dailyLucky", todayStr), {
-          winnerId: student.id,
-          time: timeStr
-        });
-        setLuckyWinner(student.name);
-      }
+      
     }
     else if (diffMin >= -15 && diffMin < -10) {
       point = 1;
@@ -313,8 +338,11 @@ const handleCardClick = async (student, scheduleTime) => {
       )
     );
 
-    // 알림 및 UI
-    sendBizppurioMessage(`${student.name}님 출석하였습니다`);
+    // 알림톡+문자 발송
+    await sendBizppurioMessage("checkin", student, {
+      scheduleTime,     // 수업 시작 "HH:MM"
+      timeText: timeStr // 실제 출석 시간 "HH:MM"
+    });
     alert(`✅ ${student.name}님 출석 완료! (+${point}pt)`);
     return;
   }
@@ -367,7 +395,11 @@ const handleCardClick = async (student, scheduleTime) => {
     }));
 
     // 알림 및 UI
-    sendBizppurioMessage(`${student.name}님 하원하였습니다`);
+     // 알림톡+문자 발송
+    await sendBizppurioMessage("checkout", student, {
+      scheduleTime,      // 선택: 반 고정 시간 전달하고 싶으면 유지
+      timeText: depTime  // 실제 하원 시간
+    });
     alert(`✅ ${student.name}님 하원 완료! (+1pt)`);
     return;
   }
@@ -477,7 +509,7 @@ const getTopRankings = (field) => {
     hour: "2-digit",
     minute: "2-digit",
   });
-  const todayStr = now.toISOString().split("T")[0];
+ const todayStr = ymdLocal(now);
 
   
   await setDoc(doc(db, "high-attendance", todayStr), {
@@ -596,28 +628,16 @@ const getTopRankings = (field) => {
     <div
       key={student.id}
       className={`
-        relative            /* 스탬프 위치를 위해 */
-        card
-        ${isPresent
-          ? record.status === "tardy" ? "tardy" : "attended"
-         : ""
-        }
-{hasDeparted
-  ? "border-4 border-blue-700 ring-4 ring-blue-300 ring-offset-2 ring-offset-white"
-  : ""}        ${animated[student.name] ? "animated" : ""}
-        ${!isToday
-          ? "cursor-not-allowed pointer-events-none"
-          : hasDeparted      /* 하원 완료된 경우에만 비활성화 */
-            ? "cursor-not-allowed pointer-events-none"
-            : "cursor-pointer hover:shadow-lg"
-        }
-      `}
-
-      onContextMenu={(e) => e.preventDefault()}
-     onClick={(e) => {
-      e.preventDefault();           // 클릭 기본 동작 차단
-      handleCardClick(student, time);
-    }}
+   relative card
+   ${isPresent ? (record.status === "tardy" ? "tardy" : "attended") : ""}
+   ${hasDeparted ? "border-4 border-blue-700 ring-4 ring-blue-300 ring-offset-2 ring-offset-white" : ""}
+   ${!isToday
+      ? "cursor-not-allowed pointer-events-none"
+      : (hasDeparted ? "cursor-not-allowed pointer-events-none" : "cursor-pointer hover:shadow-lg")}
+   touch-manipulation
+ `}
+ onContextMenu={(e) => e.preventDefault()}
+ onPointerUp={() => handleCardClick(student, time)}
     >
       {/* ── 하원 완료 스탬프 ── */}
       {hasDeparted && (
