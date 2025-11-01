@@ -70,6 +70,27 @@
   50% { transform: scale(1.1); }
   100% { transform: scale(1); }
 }
+/* 상태 시각화: 미출석 경고/오버듀 + 지각 출석 */
+.card.pending-warn {            /* 미출석, 시작+5분 초과 ~ 20분 미만 */
+  background-color: #fff1e6;   /* 주황 */
+  border-color: #f59e0b;
+}
+.card.pending-overdue {         /* 미출석, 시작+20분 이상 */
+  background-color: #fee2e2;   /* 빨강 */
+  border-color: #ef4444;
+}
+.card.attended-late {           /* 출석했지만 지각(20분 이후에 찍음) */
+  background-color: #fff1e6;   /* 주황 */
+  border-color: #f59e0b;
+  color: #111;
+  transform: scale(1.05);
+}
+
+/* hover 시 색 유지(기본 .card:hover 회색으로 덮이지 않게) */
+.card.pending-warn:hover     { background-color: #fff1e6; }
+.card.pending-overdue:hover  { background-color: #fee2e2; }
+.card.attended:hover         { background-color: #16a34a; } /* 기존 초록 유지 */
+.card.attended-late:hover    { background-color: #fff1e6; }
 
 /* 텍스트 세부 스타일 */
 .card .name {

@@ -190,14 +190,12 @@ useEffect(() => {
   return () => unsubscribe();
 }, [selectedDate]);
 
-
 useEffect(() => {
-  const fetchChanges = async () => {
-    const snap = await getDocs(collection(db, 'schedule_changes'));
+  const unsub = onSnapshot(collection(db, 'schedule_changes'), (snap) => {
     const changes = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
     setScheduleChanges(changes);
-  };
-  fetchChanges();
+  });
+  return () => unsub(); // 컴포넌트 언마운트 시 구독 해제
 }, []);
 
 useEffect(() => {
@@ -280,7 +278,7 @@ const handleCardClick = async (student, scheduleTime) => {
   const todayStr = ymdLocal(new Date());
   const record   = attendance[student.name];
 
-  // ── 1) 처음 클릭 → 출석 처리 ──
+ // ── 1) 처음 클릭 → 출석 처리 ──
   if (!record) {
     // 생일 뒷 4자리 인증
     const input = prompt(`${student.name} 생일 뒷 4자리를 입력하세요 (예: 1225)`);
@@ -296,20 +294,9 @@ const handleCardClick = async (student, scheduleTime) => {
     const sched   = new Date(); sched.setHours(+hh, +mm, 0);
     const diffMin = (now - sched) / 60000;
 
-    // 상태(status)와 포인트(point) 결정
-    let status = "onTime";
-    let point  = 0;
-    if (diffMin > 15) {
-      status = "tardy";
-      point  = 0;
-    }
-    else if (diffMin >= -10 && diffMin <= 5) {
-      point = 1;
-      
-    }
-    else if (diffMin >= -15 && diffMin < -10) {
-      point = 1;
-    }
+ // ✅ 포인트는 출석하면 언제든 +1로 고정
+ let status = diffMin > 15 ? "tardy" : "onTime";  // (상태는 유지해도 되고, 전부 onTime으로 해도 무방)
+ const point = 1;
 
     // Firestore에 출석 저장
    await setDoc(doc(db, "attendance", todayStr), {
@@ -320,30 +307,27 @@ const handleCardClick = async (student, scheduleTime) => {
       ...prev,
       [student.name]: { time: timeStr, status }
     }));
-
-    // 학생 포인트/가용포인트 업데이트
-    const prevPts   = student.points || {};
-    const newPts    = { ...prevPts, 출석: (prevPts.출석 || 0) + point };
-    const prevAvail = student.availablePoints || 0;
-    const newAvail  = prevAvail + point;
-    await updateDoc(doc(db, "students", student.id), {
-      points: newPts,
-      availablePoints: newAvail
-    });
-    setStudents(prev =>
-      prev.map(s =>
-        s.id === student.id
-          ? { ...s, points: newPts, availablePoints: newAvail }
-          : s
-      )
-    );
-
+ // 학생 포인트/가용포인트 업데이트 (원자적 increment로 안전하게)
+ await updateDoc(doc(db, "students", student.id), {
+   "points.출석": increment(1),
+   availablePoints: increment(1),
+ });
+ // 로컬 상태도 즉시 반영
+ setStudents(prev => prev.map(s =>
+   s.id === student.id
+     ? {
+         ...s,
+         points: { ...s.points, 출석: (s.points?.출석 || 0) + 1 },
+         availablePoints: (s.availablePoints || 0) + 1,
+       }
+     : s
+ ));
     // 알림톡+문자 발송
     await sendBizppurioMessage("checkin", student, {
       scheduleTime,     // 수업 시작 "HH:MM"
       timeText: timeStr // 실제 출석 시간 "HH:MM"
     });
-    alert(`✅ ${student.name}님 출석 완료! (+${point}pt)`);
+  alert(`✅ ${student.name}님 출석 완료! (+1pt)`);
     return;
   }
 
@@ -524,6 +508,11 @@ const getTopRankings = (field) => {
   alert(`✅ ${student.name}님 고등부 출석 완료!`);
 };
   
+ // ⏱️ 실시간 색 변경: now를 10초마다 업데이트
+ useEffect(() => {
+   const id = setInterval(() => setNow(new Date()), 10_000);
+   return () => clearInterval(id);
+ }, []);
 
 
 
@@ -624,19 +613,43 @@ const getTopRankings = (field) => {
   const record      = attendance[student.name];
   const isPresent   = !!record;
   const hasDeparted = !!record?.departureTime;  // ✨ 하원 여부
+ // ⏰ 현재(now)와 수업시각(time) 차이(분)
+const [hh, mm] = time.split(':');
+const sched = new Date(now);
+sched.setHours(+hh, +mm, 0, 0);
+const diffMin = (now - sched) / 60000;
+
+// 🎨 카드 색상 규칙
+// - 미출석: 20분↑ 빨강(pending-overdue) / 5분↑ 주황(pending-warn) / 그 외 기본
+ // - 출석됨: 기본 초록(attended), 단 '지각'(tardy/late)일 땐 주황(attended-late)
+ const isTardy = record?.status === "tardy" || record?.status === "late";
+ const colorClass = (() => {
+   if (isPresent) {
+     return isTardy ? "attended-late" : "attended";
+   } else {
+    if (diffMin >= 20) return "pending-overdue";
+    if (diffMin > 5)  return "pending-warn";
+    return "";
+  }
+})();
+
+
  return (
     <div
       key={student.id}
       className={`
    relative card
-   ${isPresent ? (record.status === "tardy" ? "tardy" : "attended") : ""}
-   ${hasDeparted ? "border-4 border-blue-700 ring-4 ring-blue-300 ring-offset-2 ring-offset-white" : ""}
+        ${colorClass}
+
+${hasDeparted ? "border-4 border-blue-700 ring-4 ring-blue-300 ring-offset-2 ring-offset-white" : ""}
    ${!isToday
       ? "cursor-not-allowed pointer-events-none"
       : (hasDeparted ? "cursor-not-allowed pointer-events-none" : "cursor-pointer hover:shadow-lg")}
    touch-manipulation
  `}
  onContextMenu={(e) => e.preventDefault()}
+
+
  onPointerUp={() => handleCardClick(student, time)}
     >
       {/* ── 하원 완료 스탬프 ── */}
@@ -666,7 +679,7 @@ const getTopRankings = (field) => {
       {isPresent && (
   <div className="time-text m-0 leading-none mt-1 text-sm">
     <div>
-      {record.status === "tardy" ? "⚠️ 지각" : "✅ 출석"}
+    {(record.status === "tardy" || record.status === "late") ? "⚠️ 지각" : "✅ 출석"}
     </div>
     {/* 출석시간 */}
     <div>출석: {record.time}</div>
