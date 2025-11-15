@@ -60,76 +60,75 @@ function ymdLocal(d) {
   const dd = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${dd}`;
 }
-
 function AttendanceApp() {
-
+  // ── useState (최상단 고정) ──
   const [students, setStudents] = useState([]);
   const [attendance, setAttendance] = useState({});
-  const [todayMakeups, setTodayMakeups] = useState([]); // 🔥 보강 표시용
+  const [todayMakeups, setTodayMakeups] = useState([]); // 보강 표시용
   const [selectedTab, setSelectedTab] = useState("attendance");
   const [animated, setAnimated] = useState({});
-  // 비밀번호 입력값
-  const [password, setPassword] = useState("");
-  // 인증 여부: 로컬스토리지에 “authenticated”가 "true" 이면 바로 true, 아니면 false
-   // 로컬스토리지에 저장된 인증 여부를 초기값으로 세팅
- const [authenticated, setAuthenticated] = useState(() =>
-   localStorage.getItem("authenticated") === "true"
- );
+  const [password, setPassword] = useState(""); // 출석 비번
+  const [authenticated, setAuthenticated] = useState(() =>
+    localStorage.getItem("authenticated") === "true"
+  );
   const [now, setNow] = useState(new Date());
-  const [currentPage, setCurrentPage] = useState(0); // 🔥 추가: 페이지 번호
-// ✅ 1. 상단 useState 추가
-const [luckyWinner, setLuckyWinner] = useState(null);
-const [luckyVisible, setLuckyVisible] = useState(false);
-const [highStudents, setHighStudents] = useState([]);
-const [highAttendance, setHighAttendance] = useState({});
-const [dateOffset, setDateOffset] = useState(0);
- const selectedDate = useMemo(() => {
-   const d = new Date();
-   d.setDate(d.getDate() + dateOffset);
-   return ymdLocal(d);
- }, [dateOffset]);
+  const [currentPage, setCurrentPage] = useState(0);
+  const [luckyWinner, setLuckyWinner] = useState(null);
+  const [luckyVisible, setLuckyVisible] = useState(false);
+  const [highStudents, setHighStudents] = useState([]);
+  const [highAttendance, setHighAttendance] = useState({});
+  const [dateOffset, setDateOffset] = useState(0);
+  const [dailyLucky, setDailyLucky] = useState({
+    winnerId: null,
+    candidateId: null,
+  });
+  const [scheduleChanges, setScheduleChanges] = useState([]);
 
-// ─── 오늘 날짜인지 판단 ───
+  // ── 고정 상수 ──
+  const pointFields = ["출석", "숙제", "수업태도", "시험", "문제집완료"];
+
+  // ── 파생값 ──
+  const selectedDate = useMemo(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + dateOffset);
+    return ymdLocal(d);
+  }, [dateOffset]);
+
   const actualTodayStr = ymdLocal(new Date());
   const isToday = selectedDate === actualTodayStr;
   const totalToday = Object.keys(attendance).length;
   const timeStr = now.toLocaleTimeString([], {
     hour: "2-digit",
     minute: "2-digit",
-    hour12: false,  // ✅ 이 줄 추가
+    hour12: false,
   });
 
   const studentsPerPage = 10;
-  const sortedStudents = [...students].sort((a, b) => a.name.localeCompare(b.name));
+  const sortedStudents = [...students].sort((a, b) =>
+    a.name.localeCompare(b.name)
+  );
   const totalPages = Math.ceil(sortedStudents.length / studentsPerPage);
   const paginatedStudents = sortedStudents.slice(
     currentPage * studentsPerPage,
     currentPage * studentsPerPage + studentsPerPage
   );
-  
-// ✅ 포인트 항목 리스트 선언
-const pointFields = ["출석", "숙제", "수업태도", "시험", "문제집완료"];
-
-const [dailyLucky, setDailyLucky] = useState({ winnerId: null, candidateId: null });
 
   const today = new Date();
-// ➕ 로컬 시간(KST) 기준 YYYY-MM-DD
-const todayStr = selectedDate;
+  const todayStr = selectedDate; // KST YYYY-MM-DD
   const weekdays = ["일", "월", "화", "수", "목", "금", "토"];
-const todayWeekday = weekdays[new Date(selectedDate).getDay()];
-  // ─── 개발용: localhost 에서 띄우면 자동 로그인 ───
+  const todayWeekday = weekdays[new Date(selectedDate).getDay()];
+
+  // ── Effects (순서 고정) ──
   useEffect(() => {
     if (window.location.hostname === "localhost") {
       setAuthenticated(true);
       localStorage.setItem("authenticated", "true");
     }
   }, []);
-  // 📌 브라우저 “/” 키로 열리는 페이지 찾기 막기
+
   useEffect(() => {
     const blockSlash = (e) => {
-      if (e.key === "/") {
-        e.preventDefault();
-      }
+      if (e.key === "/") e.preventDefault();
     };
     window.addEventListener("keydown", blockSlash);
     return () => window.removeEventListener("keydown", blockSlash);
@@ -139,9 +138,9 @@ const todayWeekday = weekdays[new Date(selectedDate).getDay()];
     const fetchData = async () => {
       const snap = await getDocs(collection(db, "students"));
       const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-    
-      // ✅ 기존 points: 숫자 → 항목별 객체로 마이그레이션
-     const batch = writeBatch(db);
+
+      // points 마이그레이션 & availablePoints 초기화
+      const batch = writeBatch(db);
       list.forEach((s) => {
         if (typeof s.points === "number") {
           const converted = {
@@ -161,90 +160,99 @@ const todayWeekday = weekdays[new Date(selectedDate).getDay()];
             }
           });
         }
-
-  // 🔥 가용포인트 초기화: availablePoints 필드가 없으면 0으로 설정
-      if (s.availablePoints === undefined) {
-        s.availablePoints = 0;
-        batch.update(doc(db, "students", s.id), { availablePoints: 0 });
-      }
-
+        if (s.availablePoints === undefined) {
+          s.availablePoints = 0;
+          batch.update(doc(db, "students", s.id), { availablePoints: 0 });
+        }
       });
       await batch.commit();
       setStudents(list);
-    
-      // 🚨 오늘 출석 초기화 (이전 테스트 기록 제거)
-      // ➕ 오늘 출석 문서를 완전 덮어쓴 뒤, 다시 읽어와서 빈 상태로 초기화
-   
     };
-    
+    fetchData();
+  }, []);
 
-fetchData(); // ✅ 함수 실행
-}, []);
-const [scheduleChanges, setScheduleChanges] = useState([]);
-
-useEffect(() => {
-  const attRef = doc(db, "attendance", selectedDate);
-  const unsubscribe = onSnapshot(attRef, snap => {
-    setAttendance(snap.exists() ? snap.data() : {});
-  });
-  return () => unsubscribe();
-}, [selectedDate]);
-
-useEffect(() => {
-  const unsub = onSnapshot(collection(db, 'schedule_changes'), (snap) => {
-    const changes = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-    setScheduleChanges(changes);
-  });
-  return () => unsub(); // 컴포넌트 언마운트 시 구독 해제
-}, []);
-
-useEffect(() => {
-  const fetchHigh = async () => {
-    const snap = await getDocs(collection(db, 'students_high'));
-    const list = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-    setHighStudents(list);
-  };
-  fetchHigh();
-}, []);
-
- useEffect(() => {
-   const fetchHighAttendance = async () => {
-     const snap = await getDoc(doc(db, "high-attendance", selectedDate));
-     setHighAttendance(snap.exists() ? snap.data() : {});
-   };
-   fetchHighAttendance();
- }, [selectedDate]);
-
-
-const getScheduleForDate = (studentId, dateStr) => {
-  const changes = scheduleChanges.filter(c => c.studentId === studentId);
-  const applicable = changes.filter(c => c.effectiveDate <= dateStr);
-  if (applicable.length === 0) {
-    const student = students.find(s => s.id === studentId);
-    return student?.schedules || [];
-  }
-  applicable.sort((a, b) => b.effectiveDate.localeCompare(a.effectiveDate));
-  return applicable[0].schedules;
-};
-
-  const getTimeGroups = () => {
-  const g = {};
-  const dateStr = selectedDate;
-
-
-  students.forEach((s) => {
-    if (s.active === false || (s.pauseDate && s.pauseDate <= dateStr)) return;
-    const schedules = getScheduleForDate(s.id, dateStr);
-    schedules.forEach(({ day, time }) => {
-      if (day === todayWeekday) {
-        if (!g[time]) g[time] = [];
-        g[time].push(s);
-      }
+  useEffect(() => {
+    const attRef = doc(db, "attendance", selectedDate);
+    const unsubscribe = onSnapshot(attRef, (snap) => {
+      setAttendance(snap.exists() ? snap.data() : {});
     });
-  });
+    return () => unsubscribe();
+  }, [selectedDate]);
 
-  return g;
-};
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, "schedule_changes"), (snap) => {
+      const changes = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      setScheduleChanges(changes);
+    });
+    return () => unsub();
+  }, []);
+
+  useEffect(() => {
+    const fetchHigh = async () => {
+      const snap = await getDocs(collection(db, "students_high"));
+      const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      setHighStudents(list);
+    };
+    fetchHigh();
+  }, []);
+
+  useEffect(() => {
+    const fetchHighAttendance = async () => {
+      const snap = await getDoc(doc(db, "high-attendance", selectedDate));
+      setHighAttendance(snap.exists() ? snap.data() : {});
+    };
+    fetchHighAttendance();
+  }, [selectedDate]);
+
+  useEffect(() => {
+    const loadLuckyWinner = async () => {
+      const t = ymdLocal(new Date());
+      const luckyRef = doc(db, "dailyLucky", t);
+      const luckySnap = await getDoc(luckyRef);
+      if (luckySnap.exists()) {
+        const data = luckySnap.data();
+        setLuckyWinner(data.name);
+        setDailyLucky(data);
+      }
+    };
+    loadLuckyWinner();
+  }, []);
+
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 10_000);
+    return () => clearInterval(id);
+  }, []);
+
+  // ── Helper: 날짜별 스케줄 가져오기 ──
+  const getScheduleForDate = (studentId, dateStr) => {
+    const changes = scheduleChanges.filter((c) => c.studentId === studentId);
+    const applicable = changes.filter((c) => c.effectiveDate <= dateStr);
+    if (applicable.length === 0) {
+      const student = students.find((s) => s.id === studentId);
+      return student?.schedules || [];
+    }
+    applicable.sort((a, b) => b.effectiveDate.localeCompare(a.effectiveDate));
+    return applicable[0].schedules;
+  };
+
+  // ── 시간대별 그룹 ──
+  const getTimeGroups = () => {
+    const g = {};
+    const dateStr = selectedDate;
+
+    students.forEach((s) => {
+      if (s.active === false || (s.pauseDate && s.pauseDate <= dateStr)) return;
+      const schedules = getScheduleForDate(s.id, dateStr);
+      schedules.forEach(({ day, time }) => {
+        if (day === todayWeekday) {
+          if (!g[time]) g[time] = [];
+          g[time].push(s);
+        }
+      });
+    });
+
+    return g;
+  };
 
 const groupedByTime = useMemo(
   () => getTimeGroups(),
@@ -299,9 +307,10 @@ const handleCardClick = async (student, scheduleTime) => {
  const point = 1;
 
     // Firestore에 출석 저장
-   await setDoc(doc(db, "attendance", todayStr), {
-   [student.name]: { time: timeStr, status }
- }, { merge: true });
+  await setDoc(doc(db, "attendance", todayStr), {
+  [student.name]: { time: timeStr, status, studentId: student.id }  // ✅ studentId 추가
+}, { merge: true });
+
 
     setAttendance(prev => ({
       ...prev,
@@ -351,9 +360,11 @@ const handleCardClick = async (student, scheduleTime) => {
     const depTime = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
 
     // Firestore에 하원시간 추가
-    await updateDoc(doc(db, "attendance", todayStr), {
-      [`${student.name}.departureTime`]: depTime
-    });
+   await updateDoc(doc(db, "attendance", todayStr), {
+  [`${student.name}.departureTime`]: depTime,
+  [`${student.name}.studentId`]: student.id,  // ✅ 없던 날도 보강
+});
+
 
     // 하원 시 출석 포인트 1pt 추가
     await updateDoc(doc(db, "students", student.id), {
@@ -444,12 +455,19 @@ const handleCardClick = async (student, scheduleTime) => {
     const record = attendance[studentName];
     const pw = prompt("지각 상태입니다. 선생님 비밀번호를 입력하세요");
     if (pw === "0301") {
-      const newStatus = { time: record.time, status: "onTime" };
-      await setDoc(
-        doc(db, "attendance", todayStr),
-        { [studentName]: newStatus },
-        { merge: true }
-      );
+      // 학생 id 찾기(이름으로 students 배열에서 탐색, 실패 시 기존 기록의 studentId 사용)
+const matched = students.find(s => s.name === studentName);
+const sid = matched?.id || record?.studentId || null;
+
+const newStatus = { time: record.time, status: "onTime" };
+if (sid) newStatus.studentId = sid; // ✅ id 있으면 함께 기록
+
+await setDoc(
+  doc(db, "attendance", todayStr),
+  { [studentName]: newStatus },
+  { merge: true }
+);
+
       setAttendance(prev => ({ ...prev, [studentName]: newStatus }));
       alert(`${studentName}님의 출석 상태가 초록으로 변경되었습니다!`);
     }
@@ -496,9 +514,10 @@ const getTopRankings = (field) => {
  const todayStr = ymdLocal(now);
 
   
-  await setDoc(doc(db, "high-attendance", todayStr), {
-    [student.name]: { time, status: "출석" }
-  }, { merge: true });
+ await setDoc(doc(db, "high-attendance", todayStr), {
+  [student.name]: { time, status: "출석", studentId: student.id }  // ✅ studentId 추가
+}, { merge: true });
+
 
   setHighAttendance(prev => ({
     ...prev,
